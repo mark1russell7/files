@@ -61,6 +61,15 @@ const files = findFiles({
 });
 ```
 
+`findEntries` takes the same options. It also gives the folders, the links and the other entries that match. It does not enter a folder that an ignore pattern matches. A pattern `x/**` also gives the folder `x`.
+
+```ts
+import { findEntries } from "@mark1russell7/files";
+
+const entries = findEntries({ root: process.cwd(), include: ["src/**"], ignore: ["src/gen/**"], skip: [] });
+entries[0]; // { path: "/work/src", kind: "directory" }
+```
+
 `walk` gives an entry for each name and for each file and folder below it. It gives a folder before its contents and the contents in the order of their names. It does not follow a link.
 
 ```ts
