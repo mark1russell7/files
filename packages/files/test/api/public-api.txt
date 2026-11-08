@@ -1,0 +1,98 @@
+# The public API of @mark1russell7/files
+#
+# The names of each entry of the exports field, and the declaration of each name, without comments
+# and private members. The command `api-report check` compares this file with the built .d.ts files.
+# To accept a change of the API, start the build, then `api-report update`, and review the diff.
+
+## . (build/index.d.ts): names
+
+type FindOptions: build/walk.d.ts#FindOptions
+type GlobOptions: build/glob.d.ts#GlobOptions
+SKIPPED_FOLDERS: build/walk.d.ts#SKIPPED_FOLDERS
+type WalkEntry: build/walk.d.ts#WalkEntry
+type WalkOptions: build/walk.d.ts#WalkOptions
+expandHome: build/paths.d.ts#expandHome
+findFiles: build/walk.d.ts#findFiles
+findUp: build/paths.d.ts#findUp
+globBase: build/glob.d.ts#globBase
+globToRegExp: build/glob.d.ts#globToRegExp
+isGlob: build/glob.d.ts#isGlob
+isInside: build/paths.d.ts#isInside
+matchesGlob: build/glob.d.ts#matchesGlob
+resolvePath: build/paths.d.ts#resolvePath
+toPosix: build/paths.d.ts#toPosix
+walk: build/walk.d.ts#walk
+
+## ./glob (build/glob.d.ts): names
+
+GlobOptions: build/glob.d.ts#GlobOptions
+globBase: build/glob.d.ts#globBase
+globToRegExp: build/glob.d.ts#globToRegExp
+isGlob: build/glob.d.ts#isGlob
+matchesGlob: build/glob.d.ts#matchesGlob
+
+## Declarations
+
+### build/glob.d.ts#GlobOptions
+export interface GlobOptions {
+  readonly dot?: boolean | undefined;
+}
+
+### build/glob.d.ts#globBase
+export declare function globBase(glob: string): string;
+
+### build/glob.d.ts#globToRegExp
+export declare function globToRegExp(glob: string, options?: GlobOptions): RegExp;
+
+### build/glob.d.ts#isGlob
+export declare function isGlob(pattern: string): boolean;
+
+### build/glob.d.ts#matchesGlob
+export declare function matchesGlob(path: string, glob: string, options?: GlobOptions): boolean;
+
+### build/paths.d.ts#expandHome
+export declare function expandHome(path: string, home?: string): string;
+
+### build/paths.d.ts#findUp
+export declare function findUp(name: string, from: string): string | null;
+
+### build/paths.d.ts#isInside
+export declare function isInside(folder: string, path: string): boolean;
+
+### build/paths.d.ts#resolvePath
+export declare function resolvePath(path: string, base: string, home?: string): string;
+
+### build/paths.d.ts#toPosix
+export declare function toPosix(path: string, separator?: string): string;
+
+### build/walk.d.ts#FindOptions
+export interface FindOptions {
+  readonly root: string;
+  readonly include: readonly string[];
+  readonly ignore?: readonly string[] | undefined;
+  readonly ignoreRoot?: string | undefined;
+  readonly skip?: readonly string[] | undefined;
+  readonly dot?: boolean | undefined;
+}
+
+### build/walk.d.ts#SKIPPED_FOLDERS
+export declare const SKIPPED_FOLDERS: readonly string[];
+
+### build/walk.d.ts#WalkEntry
+export interface WalkEntry {
+  readonly name: string;
+  readonly path: string;
+  readonly kind: "file" | "directory" | "symlink" | "other";
+  readonly stats: Stats;
+}
+
+### build/walk.d.ts#WalkOptions
+export interface WalkOptions {
+  readonly exclude?: ReadonlySet<string> | undefined;
+}
+
+### build/walk.d.ts#findFiles
+export declare function findFiles(options: FindOptions): string[];
+
+### build/walk.d.ts#walk
+export declare function walk(base: string, names: readonly string[], options?: WalkOptions): AsyncGenerator<WalkEntry>;

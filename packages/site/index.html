@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>files</title>
+<meta name="description" content="Paths, globs and folder walks on the node: modules, with no other dependency.">
+<script>
+  // The theme before the first paint: the choice of the visitor, else the theme of the system.
+  try { const t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}
+</script>
+<link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="./">files</a>
+  <nav aria-label="Site">
+    <a href="./releases/">Releases</a>
+    <a href="./status/">Status</a>
+    <a href="https://github.com/mark1russell7/files">GitHub</a>
+    <button id="theme" class="theme" type="button" aria-label="Change the theme"><span aria-hidden="true">◐</span></button>
+  </nav>
+</header>
+
+<main>
+  <h1>files</h1>
+  <p class="lead">Paths, globs and folder walks on the node: modules, with no other dependency.</p>
+
+  <h2>Install</h2>
+  <div class="command">
+    <code id="install">pnpm add @mark1russell7/files</code>
+    <button id="copy" type="button">Copy</button>
+  </div>
+  <h2>Try a glob pattern</h2>
+  <p>The page uses <code>matchesGlob</code> of <code>@mark1russell7/files/glob</code> on each path of the list.</p>
+  <form id="tester" class="tester">
+    <label for="glob">Pattern</label>
+    <input id="glob" name="glob" type="text" spellcheck="false" autocomplete="off" value="src/**/*.{ts,tsx}">
+    <label for="paths">Paths, one on each line</label>
+    <textarea id="paths" name="paths" rows="8" spellcheck="false">src
+src/index.ts
+src/view/list.tsx
+src/.hidden.ts
+src/notes.md
+test/index.test.ts</textarea>
+    <label class="check"><input id="dot" type="checkbox" checked> The wildcards match a name that starts with a dot</label>
+  </form>
+  <p class="summary" id="summary" aria-live="polite"></p>
+  <ul class="results" id="results"></ul>
+  <details class="regexp">
+    <summary>The regular expression</summary>
+    <code id="regexp"></code>
+  </details>
+
+  <p class="note">This package has no release on npm yet. <a href="./releases/">Releases</a> shows each version, and <a href="./status/">Status</a> shows the open work.</p>
+</main>
+
+<script type="module" src="./src/index.ts"></script>
+</body>
+</html>
