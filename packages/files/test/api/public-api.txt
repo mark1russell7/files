@@ -7,11 +7,13 @@
 ## . (build/index.d.ts): names
 
 type FindOptions: build/walk.d.ts#FindOptions
+type FoundEntry: build/walk.d.ts#FoundEntry
 type GlobOptions: build/glob.d.ts#GlobOptions
 SKIPPED_FOLDERS: build/walk.d.ts#SKIPPED_FOLDERS
 type WalkEntry: build/walk.d.ts#WalkEntry
 type WalkOptions: build/walk.d.ts#WalkOptions
 expandHome: build/paths.d.ts#expandHome
+findEntries: build/walk.d.ts#findEntries
 findFiles: build/walk.d.ts#findFiles
 findUp: build/paths.d.ts#findUp
 globBase: build/glob.d.ts#globBase
@@ -75,6 +77,12 @@ export interface FindOptions {
   readonly dot?: boolean | undefined;
 }
 
+### build/walk.d.ts#FoundEntry
+export interface FoundEntry {
+  readonly path: string;
+  readonly kind: "file" | "directory" | "symlink" | "other";
+}
+
 ### build/walk.d.ts#SKIPPED_FOLDERS
 export declare const SKIPPED_FOLDERS: readonly string[];
 
@@ -90,6 +98,9 @@ export interface WalkEntry {
 export interface WalkOptions {
   readonly exclude?: ReadonlySet<string> | undefined;
 }
+
+### build/walk.d.ts#findEntries
+export declare function findEntries(options: FindOptions): FoundEntry[];
 
 ### build/walk.d.ts#findFiles
 export declare function findFiles(options: FindOptions): string[];

@@ -3,9 +3,9 @@
  * The functions use only `node:` modules.
  */
 
-import { existsSync, readdirSync, statSync, type Stats } from "node:fs";
+import { existsSync, lstatSync, readdirSync, statSync, type Stats } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { globBase, globToRegExp, isGlob } from "./glob.ts";
 import { toPosix } from "./paths.ts";
 
@@ -76,6 +76,79 @@ export function findFiles(options: FindOptions): string[] {
   return [...found].sort();
 }
 
+/** This function compares two names by their code units, as the default sort does. */
+const byName = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/** One entry that `findEntries` found. */
+export interface FoundEntry {
+  /** The absolute path. */
+  readonly path: string;
+  /** The kind from `lstat`: the value `other` is a socket, a device or a FIFO. */
+  readonly kind: "file" | "directory" | "symlink" | "other";
+}
+
+/** This function gives the kind of an entry from the result of `lstat` or of `readdir`. */
+function kindOf(entry: { isSymbolicLink(): boolean; isDirectory(): boolean; isFile(): boolean }): FoundEntry["kind"] {
+  return entry.isSymbolicLink() ? "symlink" : entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other";
+}
+
+/**
+ * This function finds the entries of each kind that match an include pattern and no ignore pattern.
+ * A folder that an ignore pattern matches, alone or with a `/` after it, is not entered. Thus `x/**`
+ * gives the folder `x`, and an ignore `x/**` leaves out `x` and its contents. A pattern with no glob
+ * character is a path, and the ignore patterns do not apply to it. The walk does not follow a
+ * symbolic link. The result is sorted by path, with no duplicates.
+ */
+export function findEntries(options: FindOptions): FoundEntry[] {
+  const root = resolve(options.root);
+  const ignoreRoot = resolve(options.ignoreRoot ?? root);
+  const skip = new Set(options.skip ?? SKIPPED_FOLDERS);
+  const glob = { dot: options.dot ?? true };
+  const ignore = (options.ignore ?? []).map((pattern) => globToRegExp(relativePattern(ignoreRoot, pattern), glob));
+  const isIgnored = (path: string, suffix = ""): boolean => {
+    const relativePath = toPosix(relative(ignoreRoot, path)) + suffix;
+    return ignore.some((pattern) => pattern.test(relativePath));
+  };
+  const found = new Map<string, FoundEntry>();
+
+  for (const pattern of options.include) {
+    const normalized = relativePattern(root, pattern);
+    if (!isGlob(normalized)) {
+      const path = resolve(root, normalized);
+      const stats = lstatSync(path, { throwIfNoEntry: false });
+      if (stats) found.set(path, { path, kind: kindOf(stats) });
+      continue;
+    }
+    const matcher = globToRegExp(normalized, glob);
+    const matches = (path: string): boolean => matcher.test(toPosix(relative(root, path)));
+    // A folder is not entered when it is skipped or ignored. "**/dist/**" matches "dist/", so the test also adds a "/".
+    const pruned = (path: string, name: string): boolean => skip.has(name) || isIgnored(path) || isIgnored(path, "/");
+    const visit = (folder: string): void => {
+      for (const entry of readdirSync(folder, { withFileTypes: true })) {
+        const path = join(folder, entry.name);
+        const kind = kindOf(entry);
+        if (kind === "directory") {
+          if (pruned(path, entry.name)) continue;
+          if (matches(path)) found.set(path, { path, kind });
+          visit(path);
+        } else if (matches(path) && !isIgnored(path)) {
+          found.set(path, { path, kind });
+        }
+      }
+    };
+    const base = resolve(root, globBase(normalized));
+    const stats = lstatSync(base, { throwIfNoEntry: false });
+    if (!stats?.isDirectory()) continue;
+    if (base !== root) {
+      // The base folder of "x/**" is "x": it is an entry of the walk, as each folder under it.
+      if (pruned(base, relative(dirname(base), base))) continue;
+      if (matches(base)) found.set(base, { path: base, kind: "directory" });
+    }
+    visit(base);
+  }
+  return [...found.values()].sort((a, b) => byName(a.path, b.path));
+}
+
 /** One entry of a walk. */
 export interface WalkEntry {
   /** The name relative to the base of the walk, with `/`. */
@@ -93,9 +166,6 @@ export interface WalkOptions {
   /** The absolute paths that the walk leaves out, with their contents. */
   readonly exclude?: ReadonlySet<string> | undefined;
 }
-
-/** This function compares two names by their code units, as the default sort does. */
-const byName = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * This function gives each entry at and under the names, relative to `base`, depth first. A folder

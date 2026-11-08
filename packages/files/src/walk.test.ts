@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { findFiles, walk, type WalkEntry } from "./walk.ts";
+import { findEntries, findFiles, walk, type FoundEntry, type WalkEntry } from "./walk.ts";
 
 let root: string;
 
@@ -87,6 +87,46 @@ describe("findFiles: the options", () => {
       "packages/a/src/index.test.ts",
       "packages/a/src/index.ts",
     ]);
+  });
+});
+
+describe("findEntries", () => {
+  const found = (entries: FoundEntry[]): string[] => entries.map((entry) => `${entry.kind} ${rel(entry.path)}`);
+
+  it("gives the folders and the files that match, with the base folder of x/**", () => {
+    expect(found(findEntries({ root, include: ["docs/**"] }))).toEqual(["directory docs", "directory docs/deep", "file docs/deep/page.mdx", "file docs/guide.md"]);
+  });
+
+  it("gives the same files as findFiles", () => {
+    for (const include of [["**/*.ts"], ["**/*"], ["packages/*/src/*.{ts,tsx}"], ["docs/**/*.md*"]]) {
+      const files = findEntries({ root, include, ignore: ["**/dist/**"] }).filter((entry) => entry.kind === "file");
+      expect(files.map((entry) => entry.path), include.join()).toEqual(findFiles({ root, include, ignore: ["**/dist/**"] }));
+    }
+  });
+
+  it("does not enter an ignored folder, and enters a folder with contents that are not ignored", () => {
+    const paths = (ignore: string[]): string[] => findEntries({ root, include: ["**"], ignore, skip: [] }).map((entry) => rel(entry.path));
+    expect(paths(["packages/**"]).some((path) => path.startsWith("packages"))).toBe(false);
+    expect(paths(["**/.*"])).toContain("packages/b/src/view.tsx");
+    expect(paths(["**/.*"]).some((path) => path.includes("/."))).toBe(false);
+    expect(paths(["docs/?"])).toContain("docs/guide.md");
+  });
+
+  it("skips node_modules and .git by default, and enters them with skip: []", () => {
+    expect(found(findEntries({ root, include: ["packages/a/**"] }))).not.toContain("directory packages/a/node_modules");
+    expect(found(findEntries({ root, include: ["packages/a/**"], skip: [] }))).toContain("file packages/a/node_modules/x/index.ts");
+  });
+
+  it("keeps the dot entries out of the wildcards with dot: false", () => {
+    expect(found(findEntries({ root, include: ["**/*.ts"], dot: false }))).not.toContain("file packages/b/src/.hidden.ts");
+    expect(found(findEntries({ root, include: [".github/*"], dot: false }))).toEqual(["file .github/ci.yml"]);
+  });
+
+  it("gives a path with no glob character as it is, and a link as a link", () => {
+    symlinkSync(join(root, "docs"), join(root, "link"), "junction");
+    expect(found(findEntries({ root, include: ["docs", "README.md", "missing", "link"] }))).toEqual(["file README.md", "directory docs", "symlink link"]);
+    expect(found(findEntries({ root, include: ["*"] }))).toContain("symlink link");
+    expect(found(findEntries({ root, include: ["link/**"] }))).toEqual([]);
   });
 });
 

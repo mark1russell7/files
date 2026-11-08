@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package",
   "name": "@mark1russell7/files",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Paths, globs and folder walks on the node: modules only: the home folder, a path inside a folder, find-up, glob patterns to regular expressions, and file walks with excludes.",
   "keywords": [
     "path",
