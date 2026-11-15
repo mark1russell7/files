@@ -132,6 +132,7 @@ describe("the path demos", () => {
     });
     const none = upResult("tsconfig.json", "src");
     expect(none.found).toBeNull();
-    expect(none.probes.map((probe) => probe.path)).toEqual(["/home/you/shop/src/tsconfig.json", "/home/you/shop/tsconfig.json", "/home/you/tsconfig.json", "/home/tsconfig.json", "/tsconfig.json"]);
+    const folders = ["/home/you/shop/src", "/home/you/shop", "/home/you", "/home", ""];
+    expect(none.probes.map((probe) => probe.path)).toEqual(folders.map((folder) => `${folder}/tsconfig.json`));
   });
 });
