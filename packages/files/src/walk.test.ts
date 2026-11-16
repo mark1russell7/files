@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { findEntries, findFiles, walk, type FoundEntry, type WalkEntry } from "./walk.ts";
+import { findEntries, findEntriesAsync, findFiles, findFilesAsync, walk, type FindOptions, type FoundEntry, type WalkEntry } from "./walk.ts";
 
 let root: string;
 
@@ -127,6 +127,76 @@ describe("findEntries", () => {
     expect(found(findEntries({ root, include: ["docs", "README.md", "missing", "link"] }))).toEqual(["file README.md", "directory docs", "symlink link"]);
     expect(found(findEntries({ root, include: ["*"] }))).toContain("symlink link");
     expect(found(findEntries({ root, include: ["link/**"] }))).toEqual([]);
+  });
+});
+
+describe("findFilesAsync and findEntriesAsync", () => {
+  /** The option sets of the tests of findFiles and findEntries above, with root and absolute patterns. */
+  const optionSets = (): FindOptions[] => {
+    const absolute = root.split(sep).join("/");
+    const packages = join(root, "packages");
+    const lint = ["**/*.test.ts", "**/dist/**", "**/.*"];
+    return [
+      { root, include: ["README.md", "docs/**/*.{md,mdx}", "packages/*/src/**/*.{ts,tsx}", "docs/guide.md"], ignore: lint },
+      { root, include: ["packages/a/src/index.test.ts", "missing.md", "docs", "nothing/**/*.md"], ignore: lint },
+      { root, include: [`${absolute}/packages/*/src/**/*.ts`], ignore: [`${absolute}/packages/**/*.test.ts`] },
+      { root: join(root, "docs"), include: [`${absolute}/packages/b/**/*.tsx`] },
+      { root: packages, include: ["**/*.ts"], ignore: ["packages/a/**"], ignoreRoot: root },
+      { root, include: ["**/*"], dot: false },
+      { root, include: ["packages/a/**"], skip: [] },
+      { root, include: ["docs/**"] },
+      { root, include: ["**"], ignore: ["**/.*"], skip: [] },
+      { root, include: ["**"], ignore: ["docs/?"], skip: [] },
+      { root, include: ["./docs/*", "docs", "README.md", "missing", "README.md/x"] },
+    ];
+  };
+
+  it("give the results of findFiles and findEntries for each option set", async () => {
+    symlinkSync(join(root, "docs"), join(root, "link"), "junction");
+    for (const options of [...optionSets(), { root, include: ["*", "link", "link/**"] }]) {
+      expect(await findFilesAsync(options), JSON.stringify(options.include)).toEqual(findFiles(options));
+      expect(await findEntriesAsync(options), JSON.stringify(options.include)).toEqual(findEntries(options));
+    }
+  });
+
+  it("give no entry for a path under a file, on each operating system", async () => {
+    // Linux gives ENOTDIR for this path, and Windows gives ENOENT
+    const options: FindOptions = { root, include: ["README.md/x", "README.md/x/y"] };
+    expect(findEntries(options)).toEqual([]);
+    expect(await findEntriesAsync(options)).toEqual([]);
+    expect(findFiles(options)).toEqual([]);
+    expect(await findFilesAsync(options)).toEqual([]);
+  });
+
+  it("reject with the error that the sync walk throws", async () => {
+    const options: FindOptions = { root, include: ["README.md/**"] };
+    const syncError = (() => {
+      try {
+        findFiles(options);
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code;
+      }
+      return "no error";
+    })();
+    expect(syncError).toBe("ENOTDIR");
+    await expect(findFilesAsync(options)).rejects.toMatchObject({ code: syncError });
+    await expect(findFilesAsync({ root, include: ["[z-a]/**"] })).rejects.toBeInstanceOf(Error);
+  });
+
+  it("give the event loop a turn during the walk", async () => {
+    let turns = 0;
+    let walking = true;
+    const tick = (): void => {
+      if (!walking) return;
+      turns++;
+      setImmediate(tick);
+    };
+    setImmediate(tick);
+    const entries = await findEntriesAsync({ root, include: ["**"], skip: [] });
+    walking = false;
+    expect(entries.length).toBeGreaterThan(10);
+    // The sync walk gives no turn. The async walk waits for 13 requests, one after the other.
+    expect(turns).toBeGreaterThan(5);
   });
 });
 

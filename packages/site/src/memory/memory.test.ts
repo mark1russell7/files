@@ -1,4 +1,4 @@
-import { findEntries, findFiles, findUp, expandHome, walk } from "@mark1russell7/files";
+import { findEntries, findEntriesAsync, findFiles, findFilesAsync, findUp, expandHome, walk } from "@mark1russell7/files";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HOME, ROOT, clearLog, treeLog } from "./tree.ts";
 
@@ -31,5 +31,23 @@ describe("the sample project in memory", () => {
   it("reads a path through a link, and throws the error of Node.js for a missing name", async () => {
     expect(findFiles({ root: ROOT, include: ["latest/view/*.js"] })).toEqual([`${ROOT}/latest/view/list.js`]);
     await expect(walk(ROOT, ["nothing"]).next()).rejects.toMatchObject({ code: "ENOENT", message: `ENOENT: no such file or directory, lstat '${ROOT}/nothing'` });
+  });
+
+  it("gives the results of the sync walks with the async walks, and reads the same folders", async () => {
+    for (const options of [
+      { root: ROOT, include: ["src/**/*.ts", "latest/view/*.js", "nothing/**", "package.json"] },
+      { root: ROOT, include: ["**"], ignore: ["**/.*"], skip: [] },
+      { root: ROOT, include: ["l*", "latest", "src/**"], dot: false },
+    ]) {
+      clearLog();
+      const files = findFiles(options);
+      const reads = [...treeLog.reads];
+      const probes = [...treeLog.probes];
+      clearLog();
+      expect(await findFilesAsync(options)).toEqual(files);
+      expect(treeLog.reads).toEqual(reads);
+      expect(treeLog.probes).toEqual(probes);
+      expect(await findEntriesAsync(options)).toEqual(findEntries(options));
+    }
   });
 });

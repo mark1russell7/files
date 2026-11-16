@@ -3,8 +3,8 @@
  * The functions use only `node:` modules.
  */
 
-import { existsSync, lstatSync, readdirSync, statSync, type Stats } from "node:fs";
-import { lstat, readdir } from "node:fs/promises";
+import { existsSync, lstatSync, readdirSync, statSync, type Dirent, type Stats } from "node:fs";
+import { lstat, readdir, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { globBase, globToRegExp, isGlob } from "./glob.ts";
 import { toPosix } from "./paths.ts";
@@ -32,48 +32,157 @@ function relativePattern(root: string, pattern: string): string {
   return isAbsolute(normalized) ? toPosix(relative(root, normalized)) : normalized;
 }
 
-/**
- * This function finds the files that match an include pattern and no ignore pattern. A pattern with
- * no glob character is a file name, and the ignore patterns do not apply to it. The result has
- * absolute paths, in sorted order, with no duplicates.
- */
-export function findFiles(options: FindOptions): string[] {
+/** One request of a walk to the file system. A driver answers it with `node:fs` or with `node:fs/promises`. */
+type Request =
+  | { readonly op: "readdir"; readonly path: string }
+  | { readonly op: "lstat"; readonly path: string }
+  | { readonly op: "exists"; readonly path: string }
+  | { readonly op: "stat"; readonly path: string };
+
+/** The steps of a walk. The generator yields each request and gets its answer. At the end, it gives the result. */
+type Steps<T> = Generator<Request, T, unknown>;
+
+/** This step gives the entries of a folder. */
+function* readFolder(path: string): Steps<Dirent[]> {
+  return (yield { op: "readdir", path }) as Dirent[];
+}
+
+/** This step gives the `lstat` result of a path, or `undefined` when no entry is at the path. */
+function* lstatOf(path: string): Steps<Stats | undefined> {
+  return (yield { op: "lstat", path }) as Stats | undefined;
+}
+
+/** This step tells if an entry exists at the path, after the links. */
+function* existsAt(path: string): Steps<boolean> {
+  return (yield { op: "exists", path }) as boolean;
+}
+
+/** This step gives the `stat` result of a path, or `undefined` when the path does not exist. A link gives its target. */
+function* statOf(path: string): Steps<Stats | undefined> {
+  return (yield { op: "stat", path }) as Stats | undefined;
+}
+
+/** This function answers a request with the sync functions of `node:fs`. */
+function answerSync(request: Request): unknown {
+  switch (request.op) {
+    case "readdir":
+      return readdirSync(request.path, { withFileTypes: true });
+    case "lstat":
+      // No entry is at a path under a file: Windows gives ENOENT, Linux gives ENOTDIR, and throwIfNoEntry covers only ENOENT
+      try {
+        return lstatSync(request.path, { throwIfNoEntry: false });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOTDIR") return undefined;
+        throw error;
+      }
+    case "exists":
+      return existsSync(request.path);
+    case "stat":
+      // As existsSync, the answer is undefined for each error
+      try {
+        return statSync(request.path);
+      } catch {
+        return undefined;
+      }
+  }
+}
+
+/** This function answers a request with `node:fs/promises`, with the same answers as `answerSync`. */
+async function answerAsync(request: Request): Promise<unknown> {
+  switch (request.op) {
+    case "readdir":
+      return readdir(request.path, { withFileTypes: true });
+    case "lstat":
+      // As in answerSync, the answer is undefined for ENOENT and ENOTDIR
+      return lstat(request.path).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT" || error.code === "ENOTDIR") return undefined;
+        throw error;
+      });
+    // As existsSync, the answer is false or undefined for each error
+    case "exists":
+      return stat(request.path).then(
+        () => true,
+        () => false,
+      );
+    case "stat":
+      return stat(request.path).catch(() => undefined);
+  }
+}
+
+/** This function does the steps of a walk with the sync functions of `node:fs`. */
+function runSync<T>(steps: Steps<T>): T {
+  let step = steps.next();
+  while (!step.done) step = steps.next(answerSync(step.value));
+  return step.value;
+}
+
+/** This function does the steps of a walk with `node:fs/promises`. Each request gives the event loop a turn. */
+async function runAsync<T>(steps: Steps<T>): Promise<T> {
+  let step = steps.next();
+  while (!step.done) step = steps.next(await answerAsync(step.value));
+  return step.value;
+}
+
+/** The parts of the options that the two walks use: the root, the skipped names, the glob options and the ignore test. */
+function prepare(options: FindOptions) {
   const root = resolve(options.root);
   const ignoreRoot = resolve(options.ignoreRoot ?? root);
-  const skip = new Set(options.skip ?? SKIPPED_FOLDERS);
   const glob = { dot: options.dot ?? true };
   const ignore = (options.ignore ?? []).map((pattern) => globToRegExp(relativePattern(ignoreRoot, pattern), glob));
   const isIgnored = (path: string, suffix = ""): boolean => {
     const relativePath = toPosix(relative(ignoreRoot, path)) + suffix;
     return ignore.some((pattern) => pattern.test(relativePath));
   };
+  return { root, skip: new Set(options.skip ?? SKIPPED_FOLDERS), glob, isIgnored };
+}
+
+/** The steps of `findFiles` and `findFilesAsync`. */
+function* findFilesSteps(options: FindOptions): Steps<string[]> {
+  const { root, skip, glob, isIgnored } = prepare(options);
   const found = new Set<string>();
 
   for (const pattern of options.include) {
     const normalized = relativePattern(root, pattern);
     if (!isGlob(normalized)) {
       const path = resolve(root, normalized);
-      if (existsSync(path) && statSync(path).isFile()) found.add(path);
+      if ((yield* statOf(path))?.isFile()) found.add(path);
       continue;
     }
     const matcher = globToRegExp(normalized, glob);
     const base = resolve(root, globBase(normalized));
-    if (!existsSync(base)) continue;
-    const visit = (folder: string): void => {
-      for (const entry of readdirSync(folder, { withFileTypes: true })) {
+    if (!(yield* existsAt(base))) continue;
+    function* visit(folder: string): Steps<void> {
+      for (const entry of yield* readFolder(folder)) {
         const path = join(folder, entry.name);
         if (entry.isDirectory()) {
           // A pattern "**/dist/**" matches the files of a folder, so the test also adds a "/" to the folder
           if (skip.has(entry.name) || isIgnored(path) || isIgnored(path, "/")) continue;
-          visit(path);
+          yield* visit(path);
         } else if (entry.isFile() && matcher.test(toPosix(relative(root, path))) && !isIgnored(path)) {
           found.add(path);
         }
       }
-    };
-    visit(base);
+    }
+    yield* visit(base);
   }
   return [...found].sort();
+}
+
+/**
+ * This function finds the files that match an include pattern and no ignore pattern. A pattern with
+ * no glob character is a file name, and the ignore patterns do not apply to it. The result has
+ * absolute paths, in sorted order, with no duplicates.
+ */
+export function findFiles(options: FindOptions): string[] {
+  return runSync(findFilesSteps(options));
+}
+
+/**
+ * This function gives the result of `findFiles` with the functions of `node:fs/promises`. The walk
+ * does not block the event loop.
+ */
+export function findFilesAsync(options: FindOptions): Promise<string[]> {
+  return runAsync(findFilesSteps(options));
 }
 
 /** This function compares two names by their code units, as the default sort does. */
@@ -92,6 +201,49 @@ function kindOf(entry: { isSymbolicLink(): boolean; isDirectory(): boolean; isFi
   return entry.isSymbolicLink() ? "symlink" : entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other";
 }
 
+/** The steps of `findEntries` and `findEntriesAsync`. */
+function* findEntriesSteps(options: FindOptions): Steps<FoundEntry[]> {
+  const { root, skip, glob, isIgnored } = prepare(options);
+  const found = new Map<string, FoundEntry>();
+
+  for (const pattern of options.include) {
+    const normalized = relativePattern(root, pattern);
+    if (!isGlob(normalized)) {
+      const path = resolve(root, normalized);
+      const stats = yield* lstatOf(path);
+      if (stats) found.set(path, { path, kind: kindOf(stats) });
+      continue;
+    }
+    const matcher = globToRegExp(normalized, glob);
+    const matches = (path: string): boolean => matcher.test(toPosix(relative(root, path)));
+    // A folder is not entered when it is skipped or ignored. "**/dist/**" matches "dist/", so the test also adds a "/".
+    const pruned = (path: string, name: string): boolean => skip.has(name) || isIgnored(path) || isIgnored(path, "/");
+    function* visit(folder: string): Steps<void> {
+      for (const entry of yield* readFolder(folder)) {
+        const path = join(folder, entry.name);
+        const kind = kindOf(entry);
+        if (kind === "directory") {
+          if (pruned(path, entry.name)) continue;
+          if (matches(path)) found.set(path, { path, kind });
+          yield* visit(path);
+        } else if (matches(path) && !isIgnored(path)) {
+          found.set(path, { path, kind });
+        }
+      }
+    }
+    const base = resolve(root, globBase(normalized));
+    const stats = yield* lstatOf(base);
+    if (!stats?.isDirectory()) continue;
+    if (base !== root) {
+      // The base folder of "x/**" is "x": it is an entry of the walk, as each folder under it.
+      if (pruned(base, relative(dirname(base), base))) continue;
+      if (matches(base)) found.set(base, { path: base, kind: "directory" });
+    }
+    yield* visit(base);
+  }
+  return [...found.values()].sort((a, b) => byName(a.path, b.path));
+}
+
 /**
  * This function finds the entries of each kind that match an include pattern and no ignore pattern.
  * A folder that an ignore pattern matches, alone or with a `/` after it, is not entered. Thus `x/**`
@@ -100,53 +252,15 @@ function kindOf(entry: { isSymbolicLink(): boolean; isDirectory(): boolean; isFi
  * symbolic link. The result is sorted by path, with no duplicates.
  */
 export function findEntries(options: FindOptions): FoundEntry[] {
-  const root = resolve(options.root);
-  const ignoreRoot = resolve(options.ignoreRoot ?? root);
-  const skip = new Set(options.skip ?? SKIPPED_FOLDERS);
-  const glob = { dot: options.dot ?? true };
-  const ignore = (options.ignore ?? []).map((pattern) => globToRegExp(relativePattern(ignoreRoot, pattern), glob));
-  const isIgnored = (path: string, suffix = ""): boolean => {
-    const relativePath = toPosix(relative(ignoreRoot, path)) + suffix;
-    return ignore.some((pattern) => pattern.test(relativePath));
-  };
-  const found = new Map<string, FoundEntry>();
+  return runSync(findEntriesSteps(options));
+}
 
-  for (const pattern of options.include) {
-    const normalized = relativePattern(root, pattern);
-    if (!isGlob(normalized)) {
-      const path = resolve(root, normalized);
-      const stats = lstatSync(path, { throwIfNoEntry: false });
-      if (stats) found.set(path, { path, kind: kindOf(stats) });
-      continue;
-    }
-    const matcher = globToRegExp(normalized, glob);
-    const matches = (path: string): boolean => matcher.test(toPosix(relative(root, path)));
-    // A folder is not entered when it is skipped or ignored. "**/dist/**" matches "dist/", so the test also adds a "/".
-    const pruned = (path: string, name: string): boolean => skip.has(name) || isIgnored(path) || isIgnored(path, "/");
-    const visit = (folder: string): void => {
-      for (const entry of readdirSync(folder, { withFileTypes: true })) {
-        const path = join(folder, entry.name);
-        const kind = kindOf(entry);
-        if (kind === "directory") {
-          if (pruned(path, entry.name)) continue;
-          if (matches(path)) found.set(path, { path, kind });
-          visit(path);
-        } else if (matches(path) && !isIgnored(path)) {
-          found.set(path, { path, kind });
-        }
-      }
-    };
-    const base = resolve(root, globBase(normalized));
-    const stats = lstatSync(base, { throwIfNoEntry: false });
-    if (!stats?.isDirectory()) continue;
-    if (base !== root) {
-      // The base folder of "x/**" is "x": it is an entry of the walk, as each folder under it.
-      if (pruned(base, relative(dirname(base), base))) continue;
-      if (matches(base)) found.set(base, { path: base, kind: "directory" });
-    }
-    visit(base);
-  }
-  return [...found.values()].sort((a, b) => byName(a.path, b.path));
+/**
+ * This function gives the result of `findEntries` with the functions of `node:fs/promises`. The walk
+ * does not block the event loop.
+ */
+export function findEntriesAsync(options: FindOptions): Promise<FoundEntry[]> {
+  return runAsync(findEntriesSteps(options));
 }
 
 /** One entry of a walk. */
