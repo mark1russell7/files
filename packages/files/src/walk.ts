@@ -36,6 +36,7 @@ function relativePattern(root: string, pattern: string): string {
 type Request =
   | { readonly op: "readdir"; readonly path: string }
   | { readonly op: "lstat"; readonly path: string }
+  | { readonly op: "exists"; readonly path: string }
   | { readonly op: "stat"; readonly path: string };
 
 /** The steps of a walk. The generator yields each request and gets its answer. At the end, it gives the result. */
@@ -51,6 +52,11 @@ function* lstatOf(path: string): Steps<Stats | undefined> {
   return (yield { op: "lstat", path }) as Stats | undefined;
 }
 
+/** This step tells if an entry exists at the path, after the links. */
+function* existsAt(path: string): Steps<boolean> {
+  return (yield { op: "exists", path }) as boolean;
+}
+
 /** This step gives the `stat` result of a path, or `undefined` when the path does not exist. A link gives its target. */
 function* statOf(path: string): Steps<Stats | undefined> {
   return (yield { op: "stat", path }) as Stats | undefined;
@@ -63,8 +69,15 @@ function answerSync(request: Request): unknown {
       return readdirSync(request.path, { withFileTypes: true });
     case "lstat":
       return lstatSync(request.path, { throwIfNoEntry: false });
+    case "exists":
+      return existsSync(request.path);
     case "stat":
-      return existsSync(request.path) ? statSync(request.path) : undefined;
+      // As existsSync, the answer is undefined for each error
+      try {
+        return statSync(request.path);
+      } catch {
+        return undefined;
+      }
   }
 }
 
@@ -79,8 +92,13 @@ async function answerAsync(request: Request): Promise<unknown> {
         if (error.code === "ENOENT" || error.code === "ENOTDIR") return undefined;
         throw error;
       });
+    // As existsSync, the answer is false or undefined for each error
+    case "exists":
+      return stat(request.path).then(
+        () => true,
+        () => false,
+      );
     case "stat":
-      // existsSync gives false for each error
       return stat(request.path).catch(() => undefined);
   }
 }
@@ -126,7 +144,7 @@ function* findFilesSteps(options: FindOptions): Steps<string[]> {
     }
     const matcher = globToRegExp(normalized, glob);
     const base = resolve(root, globBase(normalized));
-    if (!(yield* statOf(base))) continue;
+    if (!(yield* existsAt(base))) continue;
     function* visit(folder: string): Steps<void> {
       for (const entry of yield* readFolder(folder)) {
         const path = join(folder, entry.name);

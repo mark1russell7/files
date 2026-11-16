@@ -147,7 +147,7 @@ describe("findFilesAsync and findEntriesAsync", () => {
       { root, include: ["docs/**"] },
       { root, include: ["**"], ignore: ["**/.*"], skip: [] },
       { root, include: ["**"], ignore: ["docs/?"], skip: [] },
-      { root, include: ["./docs/*", "docs", "README.md", "missing"] },
+      { root, include: ["./docs/*", "docs", "README.md", "missing", "README.md/x"] },
     ];
   };
 
