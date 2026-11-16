@@ -159,6 +159,15 @@ describe("findFilesAsync and findEntriesAsync", () => {
     }
   });
 
+  it("give no entry for a path under a file, on each operating system", async () => {
+    // Linux gives ENOTDIR for this path, and Windows gives ENOENT
+    const options: FindOptions = { root, include: ["README.md/x", "README.md/x/y"] };
+    expect(findEntries(options)).toEqual([]);
+    expect(await findEntriesAsync(options)).toEqual([]);
+    expect(findFiles(options)).toEqual([]);
+    expect(await findFilesAsync(options)).toEqual([]);
+  });
+
   it("reject with the error that the sync walk throws", async () => {
     const options: FindOptions = { root, include: ["README.md/**"] };
     const syncError = (() => {

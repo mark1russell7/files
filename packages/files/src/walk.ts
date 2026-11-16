@@ -68,7 +68,13 @@ function answerSync(request: Request): unknown {
     case "readdir":
       return readdirSync(request.path, { withFileTypes: true });
     case "lstat":
-      return lstatSync(request.path, { throwIfNoEntry: false });
+      // No entry is at a path under a file: Windows gives ENOENT, Linux gives ENOTDIR, and throwIfNoEntry covers only ENOENT
+      try {
+        return lstatSync(request.path, { throwIfNoEntry: false });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOTDIR") return undefined;
+        throw error;
+      }
     case "exists":
       return existsSync(request.path);
     case "stat":
@@ -87,7 +93,7 @@ async function answerAsync(request: Request): Promise<unknown> {
     case "readdir":
       return readdir(request.path, { withFileTypes: true });
     case "lstat":
-      // lstatSync with throwIfNoEntry: false gives undefined for ENOENT and ENOTDIR
+      // As in answerSync, the answer is undefined for ENOENT and ENOTDIR
       return lstat(request.path).catch((error: NodeJS.ErrnoException) => {
         if (error.code === "ENOENT" || error.code === "ENOTDIR") return undefined;
         throw error;
