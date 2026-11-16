@@ -70,6 +70,14 @@ const entries = findEntries({ root: process.cwd(), include: ["src/**"], ignore: 
 entries[0]; // { path: "/work/src", kind: "directory" }
 ```
 
+`findFilesAsync` and `findEntriesAsync` give the same results with `node:fs/promises`. Use them in a server: the walk does not block the event loop.
+
+```ts
+import { findEntriesAsync } from "@mark1russell7/files";
+
+const entries = await findEntriesAsync({ root: process.cwd(), include: ["src/**"] });
+```
+
 `walk` gives an entry for each name and for each file and folder below it. It gives a folder before its contents and the contents in the order of their names. It does not follow a link.
 
 ```ts
