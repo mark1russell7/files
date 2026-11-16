@@ -15,7 +15,7 @@
   "devDependencies": {
     "@mark1russell7/cue": "^2.0.0",
     "@mark1russell7/files": "workspace:*",
-    "@mark1russell7/site-pages": "^0.4.12",
+    "@mark1russell7/site-pages": "^0.5.3",
     "@types/node": "^26.6.5",
     "@vitest/coverage-v8": "^5.1.0",
     "pathe": "^2.0.3",
