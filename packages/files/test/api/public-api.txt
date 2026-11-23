@@ -27,6 +27,18 @@ resolvePath: build/paths.d.ts#resolvePath
 toPosix: build/paths.d.ts#toPosix
 walk: build/walk.d.ts#walk
 
+## ./archive (build/archive.d.ts): names
+
+ARCHIVE_ERROR_KINDS: build/archive.d.ts#ARCHIVE_ERROR_KINDS
+ArchiveEntry: build/archive.d.ts#ArchiveEntry
+ArchiveError: build/archive.d.ts#ArchiveError
+ArchiveErrorKind: build/archive.d.ts#ArchiveErrorKind
+ArchiveLimits: build/archive.d.ts#ArchiveLimits
+ArchiveResult: build/archive.d.ts#ArchiveResult
+DEFAULT_ARCHIVE_LIMITS: build/archive.d.ts#DEFAULT_ARCHIVE_LIMITS
+crc32: build/archive.d.ts#crc32
+readZipEntries: build/archive.d.ts#readZipEntries
+
 ## ./glob (build/glob.d.ts): names
 
 GlobOptions: build/glob.d.ts#GlobOptions
@@ -36,6 +48,55 @@ isGlob: build/glob.d.ts#isGlob
 matchesGlob: build/glob.d.ts#matchesGlob
 
 ## Declarations
+
+### build/archive.d.ts#ARCHIVE_ERROR_KINDS
+export declare const ARCHIVE_ERROR_KINDS: readonly ["not-zip", "truncated", "bad-record", "zip64", "multi-disk", "encrypted", "method", "limit", "inflate", "size", "crc"];
+
+### build/archive.d.ts#ArchiveEntry
+export interface ArchiveEntry {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+  readonly modified: Date | null;
+}
+
+### build/archive.d.ts#ArchiveError
+export interface ArchiveError {
+  readonly kind: ArchiveErrorKind;
+  readonly message: string;
+  readonly entry?: string;
+}
+
+### build/archive.d.ts#ArchiveErrorKind
+export type ArchiveErrorKind = (typeof ARCHIVE_ERROR_KINDS)[number];
+
+### build/archive.d.ts#ArchiveLimits
+export interface ArchiveLimits {
+  readonly entryBytes?: number | undefined;
+  readonly totalBytes?: number | undefined;
+  readonly entries?: number | undefined;
+}
+
+### build/archive.d.ts#ArchiveResult
+export type ArchiveResult = {
+  readonly ok: true;
+  readonly entries: readonly ArchiveEntry[];
+} | {
+  readonly ok: false;
+  readonly error: ArchiveError;
+};
+
+### build/archive.d.ts#DEFAULT_ARCHIVE_LIMITS
+export declare const DEFAULT_ARCHIVE_LIMITS: {
+  readonly entryBytes: number;
+  readonly totalBytes: number;
+  readonly entries: number;
+};
+
+### build/archive.d.ts#crc32
+export declare function crc32(bytes: Uint8Array): number;
+
+### build/archive.d.ts#readZipEntries
+export declare function readZipEntries(bytes: Uint8Array, limits?: ArchiveLimits): ArchiveResult;
 
 ### build/glob.d.ts#GlobOptions
 export interface GlobOptions {

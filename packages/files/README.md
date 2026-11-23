@@ -1,6 +1,6 @@
 # @mark1russell7/files
 
-Plain functions for paths, glob patterns and file walks on Node.js. The package uses only `node:` modules and has no dependencies.
+Plain functions for paths, glob patterns, file walks and ZIP archives on Node.js. The package uses only `node:` modules and has no dependencies.
 
 ```sh
 npm install @mark1russell7/files
@@ -18,6 +18,25 @@ isInside("/work", "/work2");            // false
 toPosix("a\\b", "\\");                  // "a/b"
 findUp("package.json", process.cwd());  // the nearest file of the name, or null
 ```
+
+## ZIP archives
+
+The entry `@mark1russell7/files/archive` reads the files of a ZIP archive from its bytes, with `node:zlib` only.
+
+```ts
+import { readZipEntries } from "@mark1russell7/files/archive";
+
+const result = readZipEntries(bytes, { entryBytes: 50_000_000 });
+if (result.ok) for (const entry of result.entries) console.log(entry.name, entry.bytes.length, entry.modified);
+else console.error(result.error.kind, result.error.message);
+```
+
+- The reader copies a stored entry (method 0) and inflates a deflated entry (method 8). It checks the CRC-32 and the size of each entry.
+- The reader does not throw on bad input. It gives an error with a kind, for example `truncated`, `crc` or `limit`.
+- Limits stop a zip bomb: the size of one entry, the size of the archive and the count of entries. The defaults are 256 MiB, 1 GiB and 65,535.
+- The reader refuses ZIP64, archives on more than one disk, encrypted entries and the other methods.
+- The reader does not give folder entries. Join a name to a folder only after a check with `isInside`.
+- The time comes from the extended timestamp field. Without it, the reader reads the DOS time as UTC, because a DOS time has no time zone.
 
 ## Glob patterns
 
