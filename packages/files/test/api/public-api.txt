@@ -36,8 +36,10 @@ ArchiveErrorKind: build/archive.d.ts#ArchiveErrorKind
 ArchiveLimits: build/archive.d.ts#ArchiveLimits
 ArchiveResult: build/archive.d.ts#ArchiveResult
 DEFAULT_ARCHIVE_LIMITS: build/archive.d.ts#DEFAULT_ARCHIVE_LIMITS
+ZipWriteEntry: build/archive.d.ts#ZipWriteEntry
 crc32: build/archive.d.ts#crc32
 readZipEntries: build/archive.d.ts#readZipEntries
+writeZipEntries: build/archive.d.ts#writeZipEntries
 
 ## ./glob (build/glob.d.ts): names
 
@@ -92,11 +94,22 @@ export declare const DEFAULT_ARCHIVE_LIMITS: {
   readonly entries: number;
 };
 
+### build/archive.d.ts#ZipWriteEntry
+export interface ZipWriteEntry {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+  readonly modified?: Date | null;
+  readonly method?: 0 | 8;
+}
+
 ### build/archive.d.ts#crc32
 export declare function crc32(bytes: Uint8Array): number;
 
 ### build/archive.d.ts#readZipEntries
 export declare function readZipEntries(bytes: Uint8Array, limits?: ArchiveLimits): ArchiveResult;
+
+### build/archive.d.ts#writeZipEntries
+export declare function writeZipEntries(entries: readonly ZipWriteEntry[]): Uint8Array;
 
 ### build/glob.d.ts#GlobOptions
 export interface GlobOptions {
