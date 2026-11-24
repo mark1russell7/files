@@ -1,5 +1,5 @@
 /**
- * Archives: the entries of a ZIP archive from its bytes, with `node:zlib` only.
+ * Archives: the entries of a ZIP archive from its bytes, and the bytes of a ZIP archive from its entries, with `node:zlib` only.
  *
  * The reader reads the central directory, and then the data of each entry at its local header. It copies a stored
  * entry (method 0) and inflates a deflated entry (method 8). It checks the CRC-32 and the size of each entry.
@@ -11,7 +11,7 @@
  * An entry has a name, its bytes and its time of change. The readers of other archive formats give the same entry.
  */
 
-import { inflateRawSync } from "node:zlib";
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 
 /** One file of an archive. */
 export interface ArchiveEntry {
@@ -238,4 +238,115 @@ export function readZipEntries(bytes: Uint8Array, limits: ArchiveLimits = {}): A
     entries.push({ name, bytes: content, modified });
   }
   return { ok: true, entries };
+}
+
+/** One file for the writer. */
+export interface ZipWriteEntry {
+  /** The path of the file in the archive, with `/` separators. The writer writes it in UTF-8 with the UTF-8 flag. */
+  readonly name: string;
+  /** The uncompressed bytes of the file. */
+  readonly bytes: Uint8Array;
+  /** The time of the last change of the file. Default: `null`, and the reader gives `null` for the entry. */
+  readonly modified?: Date | null;
+  /** The method: 8 (deflate) or 0 (stored). Default: 8. */
+  readonly method?: 0 | 8;
+}
+
+/** The largest count of entries and the largest size of an archive without ZIP64. */
+const MAX_ENTRIES = 0xffff;
+const MAX_SIZE = 0xffffffff;
+
+/** This function gives the DOS date and time of a time in UTC. A time out of the years 1980 to 2107 gives 0 and 0. */
+function dosFields(time: Date): { readonly date: number; readonly time: number } {
+  const year = time.getUTCFullYear();
+  if (year < 1980 || year > 2107) return { date: 0, time: 0 };
+  const date = ((year - 1980) << 9) | ((time.getUTCMonth() + 1) << 5) | time.getUTCDate();
+  return { date, time: (time.getUTCHours() << 11) | (time.getUTCMinutes() << 5) | (time.getUTCSeconds() >>> 1) };
+}
+
+/**
+ * This function writes a ZIP archive of the entries, in their order. `readZipEntries` reads each entry back with its name and
+ * its bytes. A time of change has an extended timestamp field, thus the reader gives it to the second. The same entries
+ * give the same bytes with the same version of zlib.
+ *
+ * @throws RangeError when the archive needs ZIP64: more than 65,535 entries or more than 4 GiB. The function also throws
+ * for a time before 1970 or after 2106, and for a method other than 0 or 8.
+ */
+export function writeZipEntries(entries: readonly ZipWriteEntry[]): Uint8Array {
+  if (entries.length > MAX_ENTRIES) throw new RangeError(`The archive has ${entries.length} entries, and a ZIP archive without ZIP64 has at most ${MAX_ENTRIES}.`);
+  const encoder = new TextEncoder();
+  const locals: Uint8Array[] = [];
+  const centrals: Uint8Array[] = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const method = entry.method ?? 8;
+    if (method !== 0 && method !== 8) throw new RangeError(`The method of the entry "${entry.name}" is ${String(method)}, not 0 or 8.`);
+    const name = encoder.encode(entry.name);
+    const data = method === 8 ? new Uint8Array(deflateRawSync(entry.bytes)) : entry.bytes;
+    const modified = entry.modified ?? null;
+    const seconds = modified === null ? undefined : Math.floor(modified.getTime() / 1000);
+    if (seconds !== undefined && !(seconds >= 0 && seconds <= MAX_SIZE)) throw new RangeError(`The time of the entry "${entry.name}" is not in the years 1970 to 2106.`);
+    const dos = modified === null ? { date: 0, time: 0 } : dosFields(modified);
+    const extra = new Uint8Array(seconds === undefined ? 0 : 9);
+    if (seconds !== undefined) {
+      const e = new DataView(extra.buffer);
+      e.setUint16(0, EXTENDED_TIME_ID, true);
+      e.setUint16(2, 5, true);
+      e.setUint8(4, 1);
+      e.setUint32(5, seconds, true);
+    }
+    const crc = crc32(entry.bytes);
+    const local = new Uint8Array(LOCAL_SIZE + name.length + extra.length + data.length);
+    const l = new DataView(local.buffer);
+    l.setUint32(0, LOCAL_SIGNATURE, true);
+    l.setUint16(4, 20, true);
+    l.setUint16(6, FLAG_UTF8, true);
+    l.setUint16(8, method, true);
+    l.setUint16(10, dos.time, true);
+    l.setUint16(12, dos.date, true);
+    l.setUint32(14, crc, true);
+    l.setUint32(18, data.length, true);
+    l.setUint32(22, entry.bytes.length, true);
+    l.setUint16(26, name.length, true);
+    l.setUint16(28, extra.length, true);
+    local.set(name, LOCAL_SIZE);
+    local.set(extra, LOCAL_SIZE + name.length);
+    local.set(data, LOCAL_SIZE + name.length + extra.length);
+    const central = new Uint8Array(CENTRAL_SIZE + name.length + extra.length);
+    const c = new DataView(central.buffer);
+    c.setUint32(0, CENTRAL_SIGNATURE, true);
+    c.setUint16(4, 20, true);
+    c.setUint16(6, 20, true);
+    c.setUint16(8, FLAG_UTF8, true);
+    c.setUint16(10, method, true);
+    c.setUint16(12, dos.time, true);
+    c.setUint16(14, dos.date, true);
+    c.setUint32(16, crc, true);
+    c.setUint32(20, data.length, true);
+    c.setUint32(24, entry.bytes.length, true);
+    c.setUint16(28, name.length, true);
+    c.setUint16(30, extra.length, true);
+    c.setUint32(42, offset, true);
+    central.set(name, CENTRAL_SIZE);
+    central.set(extra, CENTRAL_SIZE + name.length);
+    locals.push(local);
+    centrals.push(central);
+    offset += local.length;
+    if (offset > MAX_SIZE) throw new RangeError(`The archive is larger than 4 GiB, and a ZIP archive without ZIP64 is at most ${MAX_SIZE} bytes.`);
+  }
+  const directory = centrals.reduce((sum, part) => sum + part.length, 0);
+  if (offset + directory > MAX_SIZE) throw new RangeError(`The archive is larger than 4 GiB, and a ZIP archive without ZIP64 is at most ${MAX_SIZE} bytes.`);
+  const out = new Uint8Array(offset + directory + END_SIZE);
+  let at = 0;
+  for (const part of [...locals, ...centrals]) {
+    out.set(part, at);
+    at += part.length;
+  }
+  const end = new DataView(out.buffer, at);
+  end.setUint32(0, END_SIGNATURE, true);
+  end.setUint16(8, entries.length, true);
+  end.setUint16(10, entries.length, true);
+  end.setUint32(12, directory, true);
+  end.setUint32(16, offset, true);
+  return out;
 }

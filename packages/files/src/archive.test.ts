@@ -3,7 +3,7 @@ import { deflateRawSync } from "node:zlib";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { ARCHIVE_ERROR_KINDS, crc32, readZipEntries, type ArchiveResult } from "./archive.ts";
+import { ARCHIVE_ERROR_KINDS, crc32, readZipEntries, writeZipEntries, type ArchiveResult, type ZipWriteEntry } from "./archive.ts";
 
 /** One file for the test writer. */
 interface TestFile {
@@ -231,5 +231,54 @@ describe("readZipEntries", () => {
     const disks = archive.slice();
     view(disks).setUint16(end + 4, 1, true);
     expect(errorKind(readZipEntries(disks))).toBe("multi-disk");
+  });
+});
+
+describe("writeZipEntries", () => {
+  const entry = fc.record({
+    name: fc.string({ minLength: 1, maxLength: 40 }).filter((name) => !name.endsWith("/")),
+    bytes: fc.uint8Array({ maxLength: 2000 }),
+    method: fc.constantFrom<0 | 8>(0, 8),
+    modified: fc.option(fc.integer({ min: 0, max: 0xffffffff }).map((seconds) => new Date(seconds * 1000)), { nil: null }),
+  });
+
+  it("writes an archive that readZipEntries reads back: each name, its bytes and its time to the second", () => {
+    fc.assert(
+      fc.property(fc.array(entry, { maxLength: 8 }), (entries) => {
+        const result = readZipEntries(writeZipEntries(entries));
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.entries.map((each) => each.name)).toEqual(entries.map((each) => each.name));
+        result.entries.forEach((each, index) => {
+          expect(each.bytes).toEqual(entries[index]!.bytes);
+          expect(each.modified?.getTime() ?? null).toBe(entries[index]!.modified?.getTime() ?? null);
+        });
+      }),
+    );
+  });
+
+  it("gives the same bytes for the same entries, and deflates a text that repeats", () => {
+    const text = utf8.encode("one line of text\n".repeat(1000));
+    const entries: ZipWriteEntry[] = [{ name: "a/b.txt", bytes: text, modified: new Date(Date.UTC(2026, 10, 23, 20, 0, 0)) }];
+    expect(writeZipEntries(entries)).toEqual(writeZipEntries(entries));
+    expect(writeZipEntries(entries).length).toBeLessThan(text.length / 10);
+    expect(writeZipEntries([{ ...entries[0]!, method: 0 }]).length).toBeGreaterThan(text.length);
+  });
+
+  it("writes the DOS time of a time in its years, and the reader takes the extended time first", () => {
+    const at = new Date(Date.UTC(2026, 10, 23, 20, 15, 31));
+    const bytes = writeZipEntries([{ name: "x", bytes: new Uint8Array([1]), modified: at, method: 0 }]);
+    const view = new DataView(bytes.buffer, bytes.byteOffset);
+    expect(view.getUint16(12, true)).toBe(((2026 - 1980) << 9) | (11 << 5) | 23);
+    expect(view.getUint16(10, true)).toBe((20 << 11) | (15 << 5) | 15);
+    const result = readZipEntries(bytes);
+    expect(result.ok && result.entries[0]!.modified?.getTime()).toBe(at.getTime());
+  });
+
+  it("refuses an archive that needs ZIP64, a time out of the extended field and an unknown method", () => {
+    const one = { name: "x", bytes: new Uint8Array(0) };
+    expect(() => writeZipEntries(Array.from({ length: 0x10000 }, () => one))).toThrow(RangeError);
+    expect(() => writeZipEntries([{ ...one, modified: new Date(-1000) }])).toThrow(RangeError);
+    expect(() => writeZipEntries([{ ...one, method: 12 as 0 }])).toThrow(RangeError);
   });
 });

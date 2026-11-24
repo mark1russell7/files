@@ -21,7 +21,7 @@ findUp("package.json", process.cwd());  // the nearest file of the name, or null
 
 ## ZIP archives
 
-The entry `@mark1russell7/files/archive` reads the files of a ZIP archive from its bytes, with `node:zlib` only.
+The entry `@mark1russell7/files/archive` reads and writes the files of a ZIP archive, with `node:zlib` only.
 
 ```ts
 import { readZipEntries } from "@mark1russell7/files/archive";
@@ -37,6 +37,19 @@ else console.error(result.error.kind, result.error.message);
 - The reader refuses ZIP64, archives on more than one disk, encrypted entries and the other methods.
 - The reader does not give folder entries. Join a name to a folder only after a check with `isInside`.
 - The time comes from the extended timestamp field. Without it, the reader reads the DOS time as UTC, because a DOS time has no time zone.
+
+`writeZipEntries` writes a ZIP archive of entries. Each entry has a name, its bytes, an optional time of change and the method 8 (deflate) or 0 (stored).
+
+```ts
+import { readZipEntries, writeZipEntries } from "@mark1russell7/files/archive";
+
+const bytes = writeZipEntries([{ name: "notes/a.txt", bytes: new TextEncoder().encode("text"), modified: new Date() }]);
+const again = readZipEntries(bytes);
+```
+
+- The writer gives the same bytes for the same entries with the same version of zlib.
+- The writer writes the time in an extended timestamp field, thus the reader gives it to the second.
+- The writer throws a `RangeError` for an archive that needs ZIP64: more than 65,535 entries or more than 4 GiB.
 
 ## Glob patterns
 
